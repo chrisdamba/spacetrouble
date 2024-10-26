@@ -548,6 +548,271 @@ func TestBookingRepository_GetFlights(t *testing.T) {
 	})
 }
 
+func TestBookingRepository_IsLaunchPadWeekAvailable(t *testing.T) {
+	t.Run("launchpad is available", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		launchpadID := "LP1"
+		destinationID := uuid.New().String()
+		launchTime := time.Now()
+
+		mockDb.ExpectBegin()
+
+		rows := pgxmock.NewRows([]string{"launch_in_same_week"}).
+			AddRow(true)
+
+		mockDb.ExpectQuery("SELECT launch_in_same_week\\(\\$1, \\$2, \\$3\\)").
+			WithArgs(launchpadID, destinationID, launchTime).
+			WillReturnRows(rows)
+
+		mockDb.ExpectCommit()
+
+		available, err := repo.IsLaunchPadWeekAvailable(
+			context.Background(),
+			launchpadID,
+			destinationID,
+			launchTime,
+		)
+
+		require.NoError(t, err)
+		assert.True(t, available)
+
+		err = mockDb.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+
+	t.Run("launchpad is not available", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		launchpadID := "LP1"
+		destinationID := uuid.New().String()
+		launchTime := time.Now()
+
+		mockDb.ExpectBegin()
+
+		rows := pgxmock.NewRows([]string{"launch_in_same_week"}).
+			AddRow(false)
+
+		mockDb.ExpectQuery("SELECT launch_in_same_week\\(\\$1, \\$2, \\$3\\)").
+			WithArgs(launchpadID, destinationID, launchTime).
+			WillReturnRows(rows)
+
+		mockDb.ExpectCommit()
+
+		available, err := repo.IsLaunchPadWeekAvailable(
+			context.Background(),
+			launchpadID,
+			destinationID,
+			launchTime,
+		)
+
+		require.NoError(t, err)
+		assert.False(t, available)
+
+		err = mockDb.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+
+	t.Run("transaction begin error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		launchpadID := "LP1"
+		destinationID := uuid.New().String()
+		launchTime := time.Now()
+
+		mockDb.ExpectBegin().WillReturnError(errors.New("begin error"))
+
+		available, err := repo.IsLaunchPadWeekAvailable(
+			context.Background(),
+			launchpadID,
+			destinationID,
+			launchTime,
+		)
+
+		assert.Error(t, err)
+		assert.False(t, available)
+		assert.Equal(t, "begin error", err.Error())
+	})
+
+	t.Run("query error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		launchpadID := "LP1"
+		destinationID := uuid.New().String()
+		launchTime := time.Now()
+
+		mockDb.ExpectBegin()
+
+		mockDb.ExpectQuery("SELECT launch_in_same_week\\(\\$1, \\$2, \\$3\\)").
+			WithArgs(launchpadID, destinationID, launchTime).
+			WillReturnError(errors.New("query error"))
+
+		mockDb.ExpectRollback()
+
+		available, err := repo.IsLaunchPadWeekAvailable(
+			context.Background(),
+			launchpadID,
+			destinationID,
+			launchTime,
+		)
+
+		assert.Error(t, err)
+		assert.False(t, available)
+		assert.Equal(t, "query error", err.Error())
+	})
+
+	t.Run("scan error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		launchpadID := "LP1"
+		destinationID := uuid.New().String()
+		launchTime := time.Now()
+
+		mockDb.ExpectBegin()
+
+		// return invalid type that will cause scan error
+		rows := pgxmock.NewRows([]string{"launch_in_same_week"}).
+			AddRow("not a boolean")
+
+		mockDb.ExpectQuery("SELECT launch_in_same_week\\(\\$1, \\$2, \\$3\\)").
+			WithArgs(launchpadID, destinationID, launchTime).
+			WillReturnRows(rows)
+
+		mockDb.ExpectRollback()
+
+		available, err := repo.IsLaunchPadWeekAvailable(
+			context.Background(),
+			launchpadID,
+			destinationID,
+			launchTime,
+		)
+
+		assert.Error(t, err)
+		assert.False(t, available)
+	})
+
+	t.Run("commit error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		launchpadID := "LP1"
+		destinationID := uuid.New().String()
+		launchTime := time.Now()
+
+		mockDb.ExpectBegin()
+
+		rows := pgxmock.NewRows([]string{"launch_in_same_week"}).
+			AddRow(true)
+
+		mockDb.ExpectQuery("SELECT launch_in_same_week\\(\\$1, \\$2, \\$3\\)").
+			WithArgs(launchpadID, destinationID, launchTime).
+			WillReturnRows(rows)
+
+		mockDb.ExpectCommit().WillReturnError(errors.New("commit error"))
+
+		available, err := repo.IsLaunchPadWeekAvailable(
+			context.Background(),
+			launchpadID,
+			destinationID,
+			launchTime,
+		)
+
+		assert.Error(t, err)
+		assert.True(t, available) // The query returns true, even though commit fails
+		assert.Equal(t, "commit error", err.Error())
+
+		err = mockDb.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+
+	t.Run("rollback after query error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		launchpadID := "LP1"
+		destinationID := uuid.New().String()
+		launchTime := time.Now()
+
+		mockDb.ExpectBegin()
+
+		mockDb.ExpectQuery("SELECT launch_in_same_week\\(\\$1, \\$2, \\$3\\)").
+			WithArgs(launchpadID, destinationID, launchTime).
+			WillReturnError(errors.New("query error"))
+
+		mockDb.ExpectRollback()
+
+		available, err := repo.IsLaunchPadWeekAvailable(
+			context.Background(),
+			launchpadID,
+			destinationID,
+			launchTime,
+		)
+
+		assert.Error(t, err)
+		assert.False(t, available) // query error results in false
+		assert.Equal(t, "query error", err.Error())
+
+		err = mockDb.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+
+	t.Run("context canceled", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		launchpadID := "LP1"
+		destinationID := uuid.New().String()
+		launchTime := time.Now()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // Cancel immediately
+
+		mockDb.ExpectBegin().WillReturnError(context.Canceled)
+
+		available, err := repo.IsLaunchPadWeekAvailable(
+			ctx,
+			launchpadID,
+			destinationID,
+			launchTime,
+		)
+
+		assert.Error(t, err)
+		assert.False(t, available)
+		assert.Equal(t, context.Canceled, err)
+	})
+
+	t.Run("with nil values", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		mockDb.ExpectBegin()
+
+		rows := pgxmock.NewRows([]string{"launch_in_same_week"}).
+			AddRow(nil)
+
+		mockDb.ExpectQuery("SELECT launch_in_same_week\\(\\$1, \\$2, \\$3\\)").
+			WithArgs(nil, nil, time.Time{}).
+			WillReturnRows(rows)
+
+		mockDb.ExpectRollback()
+
+		available, err := repo.IsLaunchPadWeekAvailable(
+			context.Background(),
+			"",
+			"",
+			time.Time{},
+		)
+
+		assert.Error(t, err)
+		assert.False(t, available)
+	})
+}
+
 // helper functions
 func setupMockDB(t *testing.T) (pgxmock.PgxPoolIface, *repository.BookingRepository) {
 	mockDb, err := pgxmock.NewPool()

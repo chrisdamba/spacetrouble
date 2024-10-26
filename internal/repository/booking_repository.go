@@ -160,6 +160,28 @@ func (r *BookingRepository) GetFlights(ctx context.Context, filters map[string]i
 	return flights, tx.Commit(ctx)
 }
 
+func (r *BookingRepository) IsLaunchPadWeekAvailable(ctx context.Context, launchpadId, destinationId string,
+	t time.Time) (bool, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	ans, err := r.getLaunchPadWeekAvailabiltyTx(ctx, tx, launchpadId, destinationId, t)
+	if err != nil {
+		return ans, err
+	}
+	return ans, tx.Commit(ctx)
+}
+
+func (r *BookingRepository) getLaunchPadWeekAvailabiltyTx(ctx context.Context, tx pgx.Tx,
+	launchpadId, destinationId string, t time.Time) (bool, error) {
+	var ans bool
+	err := tx.QueryRow(ctx, `SELECT launch_in_same_week($1, $2, $3)`, launchpadId, destinationId, t).Scan(&ans)
+
+	return ans, err
+}
+
 func (r *BookingRepository) createUserTx(ctx context.Context, tx pgx.Tx, user *models.User) error {
 	if user.ID == uuid.Nil {
 		user.ID = uuid.New()
