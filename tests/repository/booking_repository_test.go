@@ -360,6 +360,194 @@ func TestStore_GetDestinationById(t *testing.T) {
 	})
 }
 
+func TestBookingRepository_GetFlights(t *testing.T) {
+	t.Run("successful retrieval without filters", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		expectedFlights := []models.Flight{
+			{
+				ID:          uuid.New(),
+				LaunchpadID: "LP1",
+				LaunchDate:  time.Now().Add(24 * time.Hour),
+				Destination: models.Destination{
+					ID:   uuid.New(),
+					Name: "Mars",
+				},
+			},
+			{
+				ID:          uuid.New(),
+				LaunchpadID: "LP2",
+				LaunchDate:  time.Now().Add(48 * time.Hour),
+				Destination: models.Destination{
+					ID:   uuid.New(),
+					Name: "Moon",
+				},
+			},
+		}
+
+		mockDb.ExpectBegin()
+
+		rows := pgxmock.NewRows([]string{
+			"id", "launchpad_id", "launch_date",
+			"destination_id", "destination_name",
+		})
+		for _, f := range expectedFlights {
+			rows.AddRow(
+				f.ID, f.LaunchpadID, f.LaunchDate,
+				f.Destination.ID, f.Destination.Name,
+			)
+		}
+
+		mockDb.ExpectQuery(`SELECT F.id, F.launchpad_id, F.launch_date,
+            D.id as destination_id, D.name as destination_name
+            FROM flights F
+            JOIN destinations D ON D.id = F.destination_id`).
+			WillReturnRows(rows)
+
+		mockDb.ExpectCommit()
+
+		flights, err := repo.GetFlights(context.Background(), map[string]interface{}{})
+
+		require.NoError(t, err)
+		assert.Len(t, flights, 2)
+		assert.Equal(t, expectedFlights[0].LaunchpadID, flights[0].LaunchpadID)
+		assert.Equal(t, expectedFlights[1].LaunchpadID, flights[1].LaunchpadID)
+	})
+
+	t.Run("with filters", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		filters := map[string]interface{}{
+			"launchpad_id":    "LP1",
+			"bookings.status": "CONFIRMED",
+		}
+
+		expectedFlight := models.Flight{
+			ID:          uuid.New(),
+			LaunchpadID: "LP1",
+			LaunchDate:  time.Now().Add(24 * time.Hour),
+			Destination: models.Destination{
+				ID:   uuid.New(),
+				Name: "Mars",
+			},
+		}
+
+		mockDb.ExpectBegin()
+
+		rows := pgxmock.NewRows([]string{
+			"id", "launchpad_id", "launch_date",
+			"destination_id", "destination_name",
+		}).AddRow(
+			expectedFlight.ID, expectedFlight.LaunchpadID, expectedFlight.LaunchDate,
+			expectedFlight.Destination.ID, expectedFlight.Destination.Name,
+		)
+
+		mockDb.ExpectQuery(`SELECT F.id, F.launchpad_id, F.launch_date,
+            D.id as destination_id, D.name as destination_name
+            FROM flights F
+            JOIN destinations D ON D.id = F.destination_id
+            JOIN bookings B ON B.flight_id = F.id
+            WHERE F.launchpad_id=\$1 AND B.status=\$2
+            GROUP BY F.id, D.id`).
+			WithArgs("LP1", "CONFIRMED").
+			WillReturnRows(rows)
+
+		mockDb.ExpectCommit()
+
+		flights, err := repo.GetFlights(context.Background(), filters)
+
+		require.NoError(t, err)
+		assert.Len(t, flights, 1)
+		assert.Equal(t, expectedFlight.LaunchpadID, flights[0].LaunchpadID)
+	})
+
+	t.Run("transaction begin error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		mockDb.ExpectBegin().WillReturnError(errors.New("begin error"))
+
+		flights, err := repo.GetFlights(context.Background(), map[string]interface{}{})
+
+		assert.Error(t, err)
+		assert.Nil(t, flights)
+	})
+
+	t.Run("query error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		mockDb.ExpectBegin()
+		mockDb.ExpectQuery(`SELECT F.id, F.launchpad_id`).
+			WillReturnError(errors.New("query error"))
+		mockDb.ExpectRollback()
+
+		flights, err := repo.GetFlights(context.Background(), map[string]interface{}{})
+
+		assert.Error(t, err)
+		assert.Nil(t, flights)
+	})
+
+	t.Run("scan error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		mockDb.ExpectBegin()
+
+		rows := pgxmock.NewRows([]string{
+			"id", "launchpad_id", "launch_date",
+			"destination_id", "destination_name",
+		}).AddRow(
+			"invalid-uuid", "LP1", time.Now(),
+			uuid.New(), "Mars",
+		)
+
+		mockDb.ExpectQuery(`SELECT F.id, F.launchpad_id`).
+			WillReturnRows(rows)
+		mockDb.ExpectRollback()
+
+		flights, err := repo.GetFlights(context.Background(), map[string]interface{}{})
+
+		assert.Error(t, err)
+		assert.Nil(t, flights)
+	})
+
+	t.Run("commit error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		mockDb.ExpectBegin()
+		mockDb.ExpectQuery(`SELECT F.id, F.launchpad_id`).
+			WillReturnRows(pgxmock.NewRows([]string{
+				"id", "launchpad_id", "launch_date",
+				"destination_id", "destination_name",
+			}))
+		mockDb.ExpectCommit().WillReturnError(errors.New("commit error"))
+
+		flights, err := repo.GetFlights(context.Background(), map[string]interface{}{})
+
+		assert.Error(t, err)
+		assert.Nil(t, flights)
+	})
+
+	t.Run("context cancellation", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		mockDb.ExpectBegin().WillReturnError(context.Canceled)
+
+		flights, err := repo.GetFlights(ctx, map[string]interface{}{})
+
+		assert.Equal(t, context.Canceled, err)
+		assert.Nil(t, flights)
+	})
+}
+
 // helper functions
 func setupMockDB(t *testing.T) (pgxmock.PgxPoolIface, *repository.BookingRepository) {
 	mockDb, err := pgxmock.NewPool()
@@ -424,6 +612,10 @@ func verifyBookings(t *testing.T, expected, actual []models.Booking) {
 		assert.Equal(t, expected[i].Flight.LaunchpadID, actual[i].Flight.LaunchpadID)
 		assert.Equal(t, expected[i].Flight.Destination.Name, actual[i].Flight.Destination.Name)
 	}
+}
+
+func formatQuery(q string) string {
+	return strings.Join(strings.Fields(q), " ")
 }
 
 func formatQueryForRegex(query string) string {

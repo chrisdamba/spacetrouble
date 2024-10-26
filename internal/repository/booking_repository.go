@@ -147,6 +147,107 @@ func (r *BookingRepository) GetDestinationById(ctx context.Context, id string) (
 
 }
 
+func (r *BookingRepository) GetFlights(ctx context.Context, filters map[string]interface{}) ([]models.Flight, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	flights, err := r.selectFlightsTx(ctx, tx, filters)
+	if err != nil {
+		return nil, err
+	}
+	return flights, tx.Commit(ctx)
+}
+
+func (r *BookingRepository) createUserTx(ctx context.Context, tx pgx.Tx, user *models.User) error {
+	if user.ID == uuid.Nil {
+		user.ID = uuid.New()
+	}
+	query := `
+        INSERT INTO users (id, first_name, last_name, gender, birthday)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (id) DO NOTHING
+    `
+	_, err := tx.Exec(ctx, query, user.ID, user.FirstName, user.LastName, user.Gender, user.Birthday)
+	return err
+}
+
+func (r *BookingRepository) buildSelectFlightQuery(filters map[string]interface{}) (string, []interface{}) {
+	q := `SELECT 
+			F.id, F.launchpad_id, F.launch_date,
+			D.id as destination_id, D.name as destination_name
+			FROM flights F
+			JOIN destinations D ON D.id = F.destination_id`
+	bookingStatus, hasBookingStatus := filters["bookings.status"]
+	if hasBookingStatus {
+		q += ` JOIN bookings B ON B.flight_id = F.id`
+	}
+	var whereConds []string
+	var args []interface{}
+	for k, v := range filters {
+		if !strings.HasPrefix(k, "bookings.") {
+			whereConds = append(whereConds, fmt.Sprintf("F.%s=$%d", k, len(args)+1))
+			args = append(args, v)
+		}
+	}
+	if hasBookingStatus {
+		whereConds = append(whereConds, fmt.Sprintf("B.status=$%d", len(args)+1))
+		args = append(args, bookingStatus)
+	}
+	if len(whereConds) > 0 {
+		q += " WHERE " + strings.Join(whereConds, " AND ")
+	}
+	if hasBookingStatus {
+		q += " GROUP BY F.id, D.id"
+	}
+	return q, args
+}
+
+func (r *BookingRepository) createFlightTx(ctx context.Context, tx pgx.Tx, flight *models.Flight) error {
+	if flight.ID == uuid.Nil {
+		flight.ID = uuid.New()
+	}
+	query := `
+        INSERT INTO flights (id, launchpad_id, destination_id, launch_date)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (id) DO NOTHING
+    `
+	_, err := tx.Exec(ctx, query, flight.ID, flight.LaunchpadID, flight.Destination.ID, flight.LaunchDate)
+	return err
+}
+
+func (r *BookingRepository) selectFlightsTx(ctx context.Context, tx pgx.Tx, filters map[string]interface{}) ([]models.Flight, error) {
+	q, args := r.buildSelectFlightQuery(filters)
+	rows, err := tx.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []models.Flight
+	for rows.Next() {
+		var flight models.Flight
+		err := rows.Scan(
+			&flight.ID, &flight.LaunchpadID, &flight.LaunchDate,
+			&flight.Destination.ID, &flight.Destination.Name,
+		)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, flight)
+	}
+	return items, rows.Err()
+}
+
+func (r *BookingRepository) createBookingTx(ctx context.Context, tx pgx.Tx, booking *models.Booking) error {
+	query := `
+        INSERT INTO bookings (id, user_id, flight_id, status, created_at)
+        VALUES ($1, $2, $3, $4, $5)
+    `
+	_, err := tx.Exec(ctx, query, booking.ID, booking.User.ID, booking.Flight.ID, booking.Status, booking.CreatedAt)
+	return err
+}
+
 func encodeCursor(t time.Time, id uuid.UUID) string {
 	cursor := fmt.Sprintf("%s,%s", t.Format(time.RFC3339Nano), id.String())
 	return base64.StdEncoding.EncodeToString([]byte(cursor))
@@ -170,39 +271,4 @@ func decodeCursor(encoded string) (time.Time, uuid.UUID, error) {
 		return time.Time{}, uuid.Nil, err
 	}
 	return t, id, nil
-}
-
-func (r *BookingRepository) createUserTx(ctx context.Context, tx pgx.Tx, user *models.User) error {
-	if user.ID == uuid.Nil {
-		user.ID = uuid.New()
-	}
-	query := `
-        INSERT INTO users (id, first_name, last_name, gender, birthday)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (id) DO NOTHING
-    `
-	_, err := tx.Exec(ctx, query, user.ID, user.FirstName, user.LastName, user.Gender, user.Birthday)
-	return err
-}
-
-func (r *BookingRepository) createFlightTx(ctx context.Context, tx pgx.Tx, flight *models.Flight) error {
-	if flight.ID == uuid.Nil {
-		flight.ID = uuid.New()
-	}
-	query := `
-        INSERT INTO flights (id, launchpad_id, destination_id, launch_date)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (id) DO NOTHING
-    `
-	_, err := tx.Exec(ctx, query, flight.ID, flight.LaunchpadID, flight.Destination.ID, flight.LaunchDate)
-	return err
-}
-
-func (r *BookingRepository) createBookingTx(ctx context.Context, tx pgx.Tx, booking *models.Booking) error {
-	query := `
-        INSERT INTO bookings (id, user_id, flight_id, status, created_at)
-        VALUES ($1, $2, $3, $4, $5)
-    `
-	_, err := tx.Exec(ctx, query, booking.ID, booking.User.ID, booking.Flight.ID, booking.Status, booking.CreatedAt)
-	return err
 }
