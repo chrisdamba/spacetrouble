@@ -15,6 +15,7 @@ import (
 type DBConn interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
 	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
 }
 
@@ -134,6 +135,16 @@ func (r *BookingRepository) GetBookingsPaginated(ctx context.Context, afterCurso
 	}
 
 	return bookings, nextCursor, nil
+}
+
+func (r *BookingRepository) GetDestinationById(ctx context.Context, id string) (*models.Destination, error) {
+	q := `SELECT id, name FROM destinations WHERE id = $1`
+	var dest models.Destination
+	if err := r.db.QueryRow(ctx, q, id).Scan(&dest.ID, &dest.Name); err != nil {
+		return &dest, err
+	}
+	return &dest, nil
+
 }
 
 func encodeCursor(t time.Time, id uuid.UUID) string {

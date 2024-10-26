@@ -3,9 +3,11 @@ package repository_test
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"github.com/chrisdamba/spacetrouble/internal/repository"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"regexp"
 	"strings"
 	"testing"
@@ -248,6 +250,113 @@ func TestGetBookingsPaginated(t *testing.T) {
 
 		_, _, err := repo.GetBookingsPaginated(context.Background(), "", 10)
 		assert.Error(t, err)
+	})
+}
+
+func TestStore_GetDestinationById(t *testing.T) {
+	t.Run("successful retrieval", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		destID := uuid.New()
+		expectedDest := models.Destination{
+			ID:   destID,
+			Name: "Mars",
+		}
+
+		mockDb.ExpectQuery("SELECT id, name FROM destinations WHERE id = \\$1").
+			WithArgs(destID.String()).
+			WillReturnRows(pgxmock.NewRows([]string{"id", "name"}).
+				AddRow(expectedDest.ID, expectedDest.Name))
+
+		result, err := repo.GetDestinationById(context.Background(), destID.String())
+
+		require.NoError(t, err)
+		assert.Equal(t, expectedDest.ID, result.ID)
+		assert.Equal(t, expectedDest.Name, result.Name)
+
+		err = mockDb.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+
+	t.Run("destination not found", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		nonExistentID := uuid.New()
+
+		mockDb.ExpectQuery("SELECT id, name FROM destinations WHERE id = \\$1").
+			WithArgs(nonExistentID.String()).
+			WillReturnError(pgx.ErrNoRows)
+
+		result, err := repo.GetDestinationById(context.Background(), nonExistentID.String())
+
+		assert.Error(t, err)
+		assert.Equal(t, pgx.ErrNoRows, err)
+		assert.Empty(t, result)
+
+		err = mockDb.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+
+	t.Run("invalid uuid format", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		invalidID := "not-a-uuid"
+
+		mockDb.ExpectQuery("SELECT id, name FROM destinations WHERE id = \\$1").
+			WithArgs(invalidID).
+			WillReturnError(errors.New("invalid UUID format"))
+
+		result, err := repo.GetDestinationById(context.Background(), invalidID)
+
+		assert.Error(t, err)
+		assert.Empty(t, result)
+
+		err = mockDb.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+
+	t.Run("database error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		destID := uuid.New()
+
+		mockDb.ExpectQuery("SELECT id, name FROM destinations WHERE id = \\$1").
+			WithArgs(destID.String()).
+			WillReturnError(errors.New("database connection error"))
+
+		result, err := repo.GetDestinationById(context.Background(), destID.String())
+
+		assert.Error(t, err)
+		assert.Empty(t, result)
+
+		err = mockDb.ExpectationsWereMet()
+		require.NoError(t, err)
+	})
+
+	t.Run("context canceled", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		destID := uuid.New()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		mockDb.ExpectQuery("SELECT id, name FROM destinations WHERE id = \\$1").
+			WithArgs(destID.String()).
+			WillReturnError(context.Canceled)
+
+		result, err := repo.GetDestinationById(ctx, destID.String())
+
+		assert.Error(t, err)
+		assert.Equal(t, context.Canceled, err)
+		assert.Empty(t, result)
+
+		err = mockDb.ExpectationsWereMet()
+		require.NoError(t, err)
 	})
 }
 
