@@ -2,9 +2,12 @@ package repository_test
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"github.com/chrisdamba/spacetrouble/internal/repository"
 	"github.com/google/uuid"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,11 +18,8 @@ import (
 )
 
 func TestCreateBooking(t *testing.T) {
-	mockDb, err := pgxmock.NewPool()
-	require.NoError(t, err)
+	mockDb, repo := setupMockDB(t)
 	defer mockDb.Close()
-
-	repo := repository.NewBookingRepository(mockDb)
 
 	// create fixed UUIDs for testing
 	userID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
@@ -105,4 +105,227 @@ func TestCreateBooking(t *testing.T) {
 	// verify all expectations were met
 	err = mockDb.ExpectationsWereMet()
 	assert.NoError(t, err)
+}
+
+func TestGetBookingsPaginated(t *testing.T) {
+	t.Run("successful query without cursor", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		limit := 2
+		bookings := createMockBookings(2)
+
+		rows := createMockRows(bookings)
+
+		expectedQuery := `
+            SELECT 
+                B.id, B.status, B.created_at,
+                U.id, U.first_name, U.last_name, U.gender, U.birthday,
+                F.id, F.launchpad_id, F.launch_date,
+                D.id, D.name
+            FROM bookings B
+            JOIN users U ON U.id = B.user_id
+            JOIN flights F ON F.id = B.flight_id
+            JOIN destinations D ON D.id = F.destination_id
+            ORDER BY B.created_at, B.id
+            LIMIT $1`
+
+		mockDb.ExpectQuery(formatQueryForRegex(expectedQuery)).
+			WithArgs(limit).
+			WillReturnRows(rows)
+
+		result, cursor, err := repo.GetBookingsPaginated(context.Background(), "", limit)
+
+		require.NoError(t, err)
+		require.Len(t, result, 2)
+		assert.NotEmpty(t, cursor)
+		verifyBookings(t, bookings, result)
+	})
+
+	t.Run("successful query with cursor", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		limit := 2
+		bookings := createMockBookings(2)
+		cursorTime := time.Now()
+		cursorID := uuid.New()
+		cursor := encodeCursor(cursorTime, cursorID)
+
+		rows := createMockRows(bookings)
+
+		expectedQuery := `
+            SELECT 
+                B.id, B.status, B.created_at,
+                U.id, U.first_name, U.last_name, U.gender, U.birthday,
+                F.id, F.launchpad_id, F.launch_date,
+                D.id, D.name
+            FROM bookings B
+            JOIN users U ON U.id = B.user_id
+            JOIN flights F ON F.id = B.flight_id
+            JOIN destinations D ON D.id = F.destination_id
+            WHERE (B.created_at, B.id) > ($1, $2)
+            ORDER BY B.created_at, B.id
+            LIMIT $3`
+
+		mockDb.ExpectQuery(formatQueryForRegex(expectedQuery)).
+			WithArgs(pgxmock.AnyArg(), cursorID, limit).
+			WillReturnRows(rows)
+
+		result, nextCursor, err := repo.GetBookingsPaginated(context.Background(), cursor, limit)
+
+		require.NoError(t, err)
+		require.Len(t, result, 2)
+		assert.NotEmpty(t, nextCursor)
+		verifyBookings(t, bookings, result)
+	})
+
+	t.Run("empty result", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		limit := 2
+		rows := pgxmock.NewRows([]string{
+			"id", "status", "created_at",
+			"user_id", "first_name", "last_name", "gender", "birthday",
+			"flight_id", "launchpad_id", "launch_date",
+			"destination_id", "destination_name",
+		})
+		expectedQuery := `
+			SELECT 
+				B.id, B.status, B.created_at,
+				U.id, U.first_name, U.last_name, U.gender, U.birthday,
+				F.id, F.launchpad_id, F.launch_date,
+				D.id, D.name
+			FROM bookings B
+			JOIN users U ON U.id = B.user_id
+			JOIN flights F ON F.id = B.flight_id
+			JOIN destinations D ON D.id = F.destination_id
+			ORDER BY B.created_at, B.id
+			LIMIT $1`
+
+		mockDb.ExpectQuery(formatQueryForRegex(expectedQuery)).
+			WithArgs(limit).
+			WillReturnRows(rows)
+
+		result, cursor, err := repo.GetBookingsPaginated(context.Background(), "", limit)
+
+		require.NoError(t, err)
+		assert.Empty(t, result)
+		assert.Empty(t, cursor)
+	})
+
+	t.Run("invalid cursor format", func(t *testing.T) {
+		_, repo := setupMockDB(t)
+
+		invalidCursor := base64.StdEncoding.EncodeToString([]byte("invalid"))
+
+		_, _, err := repo.GetBookingsPaginated(context.Background(), invalidCursor, 10)
+		assert.Error(t, err)
+	})
+
+	t.Run("database error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		mockDb.ExpectQuery(formatQueryForRegex(`SELECT.*FROM bookings.*`)).
+			WithArgs(10).
+			WillReturnError(fmt.Errorf("database error"))
+
+		_, _, err := repo.GetBookingsPaginated(context.Background(), "", 10)
+		assert.Error(t, err)
+	})
+
+	t.Run("scan error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		rows := pgxmock.NewRows([]string{"id"}).AddRow("invalid") // This will cause a scan error
+
+		mockDb.ExpectQuery(formatQueryForRegex(`SELECT.*FROM bookings.*`)).
+			WithArgs(10).
+			WillReturnRows(rows)
+
+		_, _, err := repo.GetBookingsPaginated(context.Background(), "", 10)
+		assert.Error(t, err)
+	})
+}
+
+// helper functions
+func setupMockDB(t *testing.T) (pgxmock.PgxPoolIface, *repository.BookingRepository) {
+	mockDb, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	return mockDb, repository.NewBookingRepository(mockDb)
+}
+
+func createMockBookings(count int) []models.Booking {
+	bookings := make([]models.Booking, count)
+	for i := 0; i < count; i++ {
+		bookings[i] = models.Booking{
+			ID:        uuid.New(),
+			Status:    models.StatusConfirmed,
+			CreatedAt: time.Now().Add(time.Duration(i) * time.Hour),
+			User: models.User{
+				ID:        uuid.New(),
+				FirstName: fmt.Sprintf("User%d", i),
+				LastName:  "Doe",
+				Gender:    "Male",
+				Birthday:  time.Now().Add(-20 * 365 * 24 * time.Hour),
+			},
+			Flight: models.Flight{
+				ID:          uuid.New(),
+				LaunchpadID: fmt.Sprintf("LP%d", i),
+				LaunchDate:  time.Now().Add(24 * time.Hour),
+				Destination: models.Destination{
+					ID:   uuid.New(),
+					Name: fmt.Sprintf("Destination%d", i),
+				},
+			},
+		}
+	}
+	return bookings
+}
+
+func createMockRows(bookings []models.Booking) *pgxmock.Rows {
+	rows := pgxmock.NewRows([]string{
+		"id", "status", "created_at",
+		"user_id", "first_name", "last_name", "gender", "birthday",
+		"flight_id", "launchpad_id", "launch_date",
+		"destination_id", "destination_name",
+	})
+
+	for _, b := range bookings {
+		rows.AddRow(
+			b.ID, b.Status, b.CreatedAt,
+			b.User.ID, b.User.FirstName, b.User.LastName, b.User.Gender, b.User.Birthday,
+			b.Flight.ID, b.Flight.LaunchpadID, b.Flight.LaunchDate,
+			b.Flight.Destination.ID, b.Flight.Destination.Name,
+		)
+	}
+	return rows
+}
+
+func verifyBookings(t *testing.T, expected, actual []models.Booking) {
+	require.Equal(t, len(expected), len(actual))
+	for i := range expected {
+		assert.Equal(t, expected[i].ID, actual[i].ID)
+		assert.Equal(t, expected[i].Status, actual[i].Status)
+		assert.Equal(t, expected[i].User.FirstName, actual[i].User.FirstName)
+		assert.Equal(t, expected[i].User.LastName, actual[i].User.LastName)
+		assert.Equal(t, expected[i].Flight.LaunchpadID, actual[i].Flight.LaunchpadID)
+		assert.Equal(t, expected[i].Flight.Destination.Name, actual[i].Flight.Destination.Name)
+	}
+}
+
+func formatQueryForRegex(query string) string {
+	// remove extra whitespace and newlines
+	query = strings.Join(strings.Fields(query), " ")
+	// escape special regex characters
+	query = regexp.QuoteMeta(query)
+	return fmt.Sprintf("^%s$", query)
+}
+
+func encodeCursor(t time.Time, id uuid.UUID) string {
+	cursor := fmt.Sprintf("%s,%s", t.Format(time.RFC3339Nano), id.String())
+	return base64.StdEncoding.EncodeToString([]byte(cursor))
 }

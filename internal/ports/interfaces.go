@@ -1,7 +1,11 @@
 package ports
 
-import models "github.com/chrisdamba/spacetrouble/internal"
+import (
+	"context"
+	models "github.com/chrisdamba/spacetrouble/internal"
+)
 
 type BookingRepository interface {
-	CreateBooking(booking *models.Booking) (*models.Booking, error)
+	CreateBooking(ctx context.Context, booking *models.Booking) (*models.Booking, error)
+	GetBookingsPaginated(ctx context.Context, afterCursor string, limit int) ([]models.Booking, string, error)
 }
