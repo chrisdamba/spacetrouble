@@ -7,12 +7,13 @@ import (
 )
 
 type BookingRequest struct {
-	FirstName     string    `json:"first_name" validate:"required,min=2,max=50"`
-	LastName      string    `json:"last_name" validate:"required,min=2,max=50"`
-	Gender        string    `json:"gender" validate:"required,oneof=Male Female Other"`
+	ID            string    `json:"id,omitempty" validate:"omitempty,valid_uuid"`
+	FirstName     string    `json:"first_name" validate:"required,name_length"`
+	LastName      string    `json:"last_name" validate:"required,name_length"`
+	Gender        string    `json:"gender" validate:"required,gender"`
 	Birthday      time.Time `json:"birthday" validate:"required,valid_age"`
-	LaunchpadID   string    `json:"launchpad_id" validate:"required,valid_launchpad"`
-	DestinationID uuid.UUID `json:"destination_id" validate:"required,uuid"`
+	LaunchpadID   string    `json:"launchpad_id" validate:"required,launchpad_id_length"`
+	DestinationID uuid.UUID `json:"destination_id" validate:"required,valid_uuid"`
 	LaunchDate    time.Time `json:"launch_date" validate:"required,future_date"`
 }
 
