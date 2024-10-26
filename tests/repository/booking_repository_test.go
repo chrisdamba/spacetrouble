@@ -21,20 +21,26 @@ func TestCreateBooking(t *testing.T) {
 
 	repo := repository.NewBookingRepository(mockDb)
 
+	// create fixed UUIDs for testing
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	flightID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	bookingID := uuid.MustParse("00000000-0000-0000-0000-000000000003")
+	destinationID := uuid.MustParse("00000000-0000-0000-0000-000000000004")
+
 	booking := &models.Booking{
-		ID: uuid.New(),
+		ID: bookingID,
 		User: models.User{
-			ID:        uuid.New(),
+			ID:        userID,
 			FirstName: "John",
 			LastName:  "Doe",
 			Gender:    "Male",
 			Birthday:  time.Now().Add(-20 * 365 * 24 * time.Hour),
 		},
 		Flight: models.Flight{
-			ID:          uuid.New(),
+			ID:          flightID,
 			LaunchpadID: "LP1",
 			Destination: models.Destination{
-				ID:   uuid.New(),
+				ID:   destinationID,
 				Name: "Mars",
 			},
 			LaunchDate: time.Now().Add(24 * time.Hour),
@@ -47,8 +53,6 @@ func TestCreateBooking(t *testing.T) {
 	mockDb.ExpectBegin()
 
 	// mock createUserTx
-	userID := uuid.New()
-	booking.User.ID = userID
 	userQuery := regexp.QuoteMeta(`
         INSERT INTO users (id, first_name, last_name, gender, birthday)
         VALUES ($1, $2, $3, $4, $5)
@@ -59,8 +63,6 @@ func TestCreateBooking(t *testing.T) {
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	// mock createFlightTx
-	flightID := uuid.New()
-	booking.Flight.ID = flightID
 	flightQuery := regexp.QuoteMeta(`
         INSERT INTO flights (id, launchpad_id, destination_id, launch_date)
         VALUES ($1, $2, $3, $4)
@@ -71,8 +73,6 @@ func TestCreateBooking(t *testing.T) {
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	// mock createBookingTx
-	bookingID := uuid.New()
-	booking.ID = bookingID
 	booking.Status = models.StatusConfirmed
 	booking.CreatedAt = time.Now().UTC()
 	bookingQuery := regexp.QuoteMeta(`
@@ -80,7 +80,7 @@ func TestCreateBooking(t *testing.T) {
         VALUES ($1, $2, $3, $4, $5)
     `)
 	mockDb.ExpectExec(bookingQuery).
-		WithArgs(booking.ID, booking.User.ID, booking.Flight.ID, booking.Status, booking.CreatedAt).
+		WithArgs(bookingID, userID, flightID, booking.Status, pgxmock.AnyArg()).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
 	// commit transaction
@@ -88,10 +88,21 @@ func TestCreateBooking(t *testing.T) {
 
 	createdBooking, err := repo.CreateBooking(context.Background(), booking)
 	require.NoError(t, err)
+	// verify the important fields
 	assert.Equal(t, booking.ID, createdBooking.ID)
 	assert.Equal(t, booking.User.FirstName, createdBooking.User.FirstName)
+	assert.Equal(t, booking.User.LastName, createdBooking.User.LastName)
+	assert.Equal(t, booking.User.Gender, createdBooking.User.Gender)
 	assert.Equal(t, booking.Flight.LaunchpadID, createdBooking.Flight.LaunchpadID)
+	assert.Equal(t, booking.Flight.Destination.ID, createdBooking.Flight.Destination.ID)
+	assert.Equal(t, models.StatusConfirmed, createdBooking.Status)
 
+	// verify time fields are set (without comparing exact values)
+	assert.False(t, createdBooking.CreatedAt.IsZero())
+	assert.False(t, createdBooking.User.Birthday.IsZero())
+	assert.False(t, createdBooking.Flight.LaunchDate.IsZero())
+
+	// verify all expectations were met
 	err = mockDb.ExpectationsWereMet()
-	require.NoError(t, err)
+	assert.NoError(t, err)
 }

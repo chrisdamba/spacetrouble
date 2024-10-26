@@ -43,7 +43,9 @@ func (r *BookingRepository) CreateBooking(ctx context.Context, booking *models.B
 	}
 
 	// create Booking
-	booking.ID = uuid.New()
+	if booking.ID == uuid.Nil {
+		booking.ID = uuid.New()
+	}
 	booking.Status = models.StatusConfirmed
 	booking.CreatedAt = time.Now().UTC()
 	err = r.createBookingTx(ctx, tx, booking)
