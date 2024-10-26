@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// Test struct that mimics BookingRequest for validation testing
 type TestBooking struct {
 	ID            string    `json:"id,omitempty" validate:"omitempty,valid_uuid"`
 	FirstName     string    `validate:"required,name_length"`

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,6 +36,12 @@ const (
 	StatusActive    BookingStatus = "ACTIVE"
 	StatusConfirmed BookingStatus = "CONFIRMED"
 	StatusCancelled BookingStatus = "CANCELLED"
+)
+
+var (
+	ErrInvalidUUID          = errors.New("invalid uuid")
+	ErrMissingDestination   = errors.New("destination does not exist")
+	ErrLaunchPadUnavailable = errors.New("launchpad is unavailable")
 )
 
 type Destination struct {
