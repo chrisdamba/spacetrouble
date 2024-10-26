@@ -879,10 +879,6 @@ func verifyBookings(t *testing.T, expected, actual []models.Booking) {
 	}
 }
 
-func formatQuery(q string) string {
-	return strings.Join(strings.Fields(q), " ")
-}
-
 func formatQueryForRegex(query string) string {
 	// remove extra whitespace and newlines
 	query = strings.Join(strings.Fields(query), " ")

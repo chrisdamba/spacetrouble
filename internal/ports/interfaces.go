@@ -14,3 +14,11 @@ type BookingRepository interface {
 	IsLaunchPadWeekAvailable(ctx context.Context, launchpadId, destinationId string,
 		t time.Time) (bool, error)
 }
+
+type BookingService interface {
+	CreateBooking(ctx context.Context, request *models.BookingRequest) (*models.Booking, error)
+}
+
+type SpaceXClient interface {
+	CheckLaunchConflict(ctx context.Context, launchpadID string, ts time.Time) (bool, error)
+}
