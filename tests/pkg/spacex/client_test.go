@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	spacex "github.com/chrisdamba/spacetrouble/internal/client"
+	"github.com/chrisdamba/spacetrouble/pkg/spacex"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"io"
