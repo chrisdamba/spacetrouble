@@ -21,28 +21,63 @@ SpaceTrouble is a Go-based REST API for booking space travel tickets. It enables
 - Make (optional, but recommended)
 - PostgreSQL 16 (handled by Docker)
 
-## Quick Start 🚀
+## Running the Project 🚀
+
+### Local Development
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/chrisdamba/spacetrouble.git
+git clone https://github.com/yourusername/spacetrouble.git
 cd spacetrouble
 ```
 
-2. Copy the example environment file:
+2. Copy and configure environment variables:
 ```bash
 cp .env.example .env
+# Edit .env with your preferred settings
 ```
 
-3. Build and start the containers:
+3. Start the services:
 ```bash
+# Build the Docker images
 make docker-build
+
+# Start all services
 make docker-up
+
+# Run database migrations
+make migrate-up
 ```
 
-4. Run database migrations:
+4. Verify the setup:
 ```bash
-make migrate-up
+# Check if services are running
+docker-compose ps
+
+# Check application logs
+docker-compose logs -f app
+
+# Test the health endpoint
+curl http://localhost:5000/v1/health
+```
+
+### Stopping the Project
+```bash
+# Stop all services
+make docker-down
+
+# Stop and remove all containers, networks, and volumes
+docker-compose down -v
+```
+
+### Rebuilding After Changes
+```bash
+# Rebuild the application
+make docker-build
+
+# Restart services
+make docker-down
+make docker-up
 ```
 
 The API will be available at `http://localhost:5000`
@@ -148,6 +183,181 @@ make docker-build
 3. Run the containers:
 ```bash
 make docker-up
+```
+
+
+## Troubleshooting 🔧
+
+### Common Docker Issues
+
+1. **Port Conflicts**
+```bash
+Error starting userland proxy: listen tcp 0.0.0.0:5000: bind: address already in use
+```
+Solution:
+```bash
+# Find the process using the port
+sudo lsof -i :5000
+# Kill the process
+kill -9 <PID>
+# Or change the port in docker-compose.yml
+```
+
+2. **Database Connection Issues**
+```bash
+error: connect: connection refused
+```
+Solutions:
+- Check if the database container is running:
+```bash
+docker-compose ps
+```
+- Verify database credentials in `.env`
+- Try restarting the services:
+```bash
+make docker-down
+make docker-up
+```
+
+3. **Permission Issues**
+```bash
+permission denied while trying to connect to the Docker daemon socket
+```
+Solution:
+```bash
+# Add your user to the docker group
+sudo usermod -aG docker ${USER}
+# Log out and back in or run:
+newgrp docker
+```
+
+4. **Database Migration Failures**
+```bash
+error: migration failed
+```
+Solutions:
+- Check migration logs:
+```bash
+docker-compose logs app
+```
+- Reset migrations:
+```bash
+make migrate-down
+make migrate-up
+```
+- Verify database connection:
+```bash
+docker-compose exec db psql -U postgres -d space -c "\l"
+```
+
+5. **Container Not Starting**
+```bash
+Error response from daemon: Container is not running
+```
+Solutions:
+- Check container logs:
+```bash
+docker-compose logs <service_name>
+```
+- Verify container status:
+```bash
+docker-compose ps
+```
+- Remove containers and volumes:
+```bash
+docker-compose down -v
+docker-compose up -d
+```
+
+6. **Image Build Failures**
+```bash
+failed to build: exit status 1
+```
+Solutions:
+- Clean Docker cache:
+```bash
+docker system prune -a
+```
+- Rebuild with no cache:
+```bash
+docker-compose build --no-cache
+```
+
+### Maintenance Commands
+
+1. **Reset Everything**
+```bash
+# Stop all containers and remove volumes
+make docker-down
+docker-compose down -v
+
+# Remove all related images
+docker rmi $(docker images | grep spacetrouble)
+
+# Rebuild from scratch
+make docker-build
+make docker-up
+make migrate-up
+```
+
+2. **View Logs**
+```bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f app
+docker-compose logs -f db
+```
+
+3. **Access Database**
+```bash
+# Connect to PostgreSQL
+docker-compose exec db psql -U postgres -d space
+
+# Backup database
+docker-compose exec db pg_dump -U postgres space > backup.sql
+
+# Restore database
+cat backup.sql | docker-compose exec -T db psql -U postgres -d space
+```
+
+4. **Check Container Status**
+```bash
+# List containers
+docker-compose ps
+
+# Container details
+docker inspect <container_id>
+
+# Resource usage
+docker stats
+```
+
+### Performance Tuning
+
+If you experience performance issues:
+
+1. **Database Tuning**
+    - Adjust `max_connections` in PostgreSQL
+    - Modify connection pool size in `.env`
+    - Monitor query performance with:
+```bash
+docker-compose exec db psql -U postgres -d space -c "SELECT * FROM pg_stat_activity;"
+```
+
+2. **Application Tuning**
+    - Adjust timeouts in `.env`
+    - Monitor memory usage:
+```bash
+docker stats spacetrouble_app_1
+```
+
+3. **System Resources**
+    - Increase Docker resources (CPU/Memory) in Docker Desktop settings
+    - Monitor resource usage:
+```bash
+docker-compose top
 ```
 
 ## Technical Details 🔧
