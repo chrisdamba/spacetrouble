@@ -1,0 +1,7 @@
+.git
+.gitignore
+.env
+*.md
+/tmp
+/dist
+.DS_Store
