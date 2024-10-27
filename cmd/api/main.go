@@ -106,7 +106,7 @@ func (a *App) setupRouter(services Services) http.Handler {
 			api.BookingHandler(services.BookingService),
 			"application/json",
 		),
-		"POST", "GET",
+		"POST", "GET", "DELETE",
 	)
 	router.HandleFunc(versionPrefix+"/bookings", bookingHandler)
 

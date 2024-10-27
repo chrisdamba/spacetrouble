@@ -253,7 +253,45 @@ func TestGetBookingsPaginated(t *testing.T) {
 	})
 }
 
-func TestStore_GetDestinationById(t *testing.T) {
+func TestGetBookingByID(t *testing.T) {
+	t.Run("successful retrieval", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		expectedBooking := createMockBookings(1)[0]
+		rows := createMockRows([]models.Booking{expectedBooking})
+
+		mockDb.ExpectQuery("SELECT.*FROM bookings.*WHERE B.id = \\$1").
+			WithArgs(expectedBooking.ID.String()).
+			WillReturnRows(rows)
+
+		booking, err := repo.GetBookingByID(context.Background(), expectedBooking.ID.String())
+
+		assert.NoError(t, err)
+		assert.Equal(t, expectedBooking.ID, booking.ID)
+		assert.NoError(t, mockDb.ExpectationsWereMet())
+	})
+
+	t.Run("booking not found", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		bookingID := uuid.New()
+
+		mockDb.ExpectQuery("SELECT.*FROM bookings.*WHERE B.id = \\$1").
+			WithArgs(bookingID.String()).
+			WillReturnError(pgx.ErrNoRows)
+
+		booking, err := repo.GetBookingByID(context.Background(), bookingID.String())
+
+		assert.Error(t, err)
+		assert.Equal(t, models.ErrBookingNotFound, err)
+		assert.Nil(t, booking)
+		assert.NoError(t, mockDb.ExpectationsWereMet())
+	})
+}
+
+func TestGetDestinationById(t *testing.T) {
 	t.Run("successful retrieval", func(t *testing.T) {
 		mockDb, repo := setupMockDB(t)
 		defer mockDb.Close()
@@ -357,6 +395,64 @@ func TestStore_GetDestinationById(t *testing.T) {
 
 		err = mockDb.ExpectationsWereMet()
 		require.NoError(t, err)
+	})
+}
+
+func TestDeleteBooking(t *testing.T) {
+	t.Run("successful deletion", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		bookingID := uuid.New().String()
+
+		mockDb.ExpectBegin()
+		mockDb.ExpectExec("DELETE FROM bookings WHERE id = \\$1").
+			WithArgs(bookingID).
+			WillReturnResult(pgxmock.NewResult("DELETE", 1))
+		mockDb.ExpectCommit()
+
+		err := repo.DeleteBooking(context.Background(), bookingID)
+
+		assert.NoError(t, err)
+		assert.NoError(t, mockDb.ExpectationsWereMet())
+	})
+
+	t.Run("booking not found", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		bookingID := uuid.New().String()
+
+		mockDb.ExpectBegin()
+		mockDb.ExpectExec("DELETE FROM bookings WHERE id = \\$1").
+			WithArgs(bookingID).
+			WillReturnResult(pgxmock.NewResult("DELETE", 0))
+		mockDb.ExpectRollback()
+
+		err := repo.DeleteBooking(context.Background(), bookingID)
+
+		assert.Error(t, err)
+		assert.Equal(t, models.ErrBookingNotFound, err)
+		assert.NoError(t, mockDb.ExpectationsWereMet())
+	})
+
+	t.Run("database error", func(t *testing.T) {
+		mockDb, repo := setupMockDB(t)
+		defer mockDb.Close()
+
+		bookingID := uuid.New().String()
+
+		mockDb.ExpectBegin()
+		mockDb.ExpectExec("DELETE FROM bookings WHERE id = \\$1").
+			WithArgs(bookingID).
+			WillReturnError(errors.New("database error"))
+		mockDb.ExpectRollback()
+
+		err := repo.DeleteBooking(context.Background(), bookingID)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to delete booking")
+		assert.NoError(t, mockDb.ExpectationsWereMet())
 	})
 }
 

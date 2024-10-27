@@ -91,3 +91,45 @@ func (s *bookingService) CreateBooking(ctx context.Context, request *models.Book
 
 	return savedBooking, nil
 }
+
+func (s *bookingService) AllBookings(ctx context.Context, req models.GetBookingsRequest) (*models.AllBookingsResponse, error) {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+
+	bookings, nextCursor, err := s.repo.GetBookingsPaginated(ctx, req.Uuid, limit)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching bookings: %w", err)
+	}
+
+	response := &models.AllBookingsResponse{
+		Bookings: make([]models.BookingResponse, len(bookings)),
+		Limit:    limit,
+		Cursor:   nextCursor,
+	}
+
+	for i, booking := range bookings {
+		response.Bookings[i] = models.BookingResponse{Booking: booking}
+	}
+
+	return response, nil
+}
+
+func (s *bookingService) DeleteBooking(ctx context.Context, id string) error {
+	if _, err := uuid.Parse(id); err != nil {
+		return models.ErrInvalidUUID
+	}
+
+	booking, err := s.repo.GetBookingByID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	// only allow deletion of active or confirmed bookings
+	if booking.Status != models.StatusActive && booking.Status != models.StatusConfirmed {
+		return fmt.Errorf("cannot delete booking with status %s", booking.Status)
+	}
+
+	return s.repo.DeleteBooking(ctx, id)
+}

@@ -44,3 +44,16 @@ func (m *MockBookingRepository) GetBookingsPaginated(ctx context.Context, afterC
 	args := m.Called(ctx, afterCursor, limit)
 	return args.Get(0).([]models.Booking), args.String(1), args.Error(2)
 }
+
+func (m *MockBookingRepository) DeleteBooking(ctx context.Context, id string) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockBookingRepository) GetBookingByID(ctx context.Context, id string) (*models.Booking, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*models.Booking), args.Error(1)
+}

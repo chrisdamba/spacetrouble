@@ -2,9 +2,9 @@ package repository
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	models "github.com/chrisdamba/spacetrouble/internal"
+	"github.com/chrisdamba/spacetrouble/internal/utils"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -64,6 +64,66 @@ func (r *BookingRepository) CreateBooking(ctx context.Context, booking *models.B
 	return booking, nil
 }
 
+func (r *BookingRepository) DeleteBooking(ctx context.Context, id string) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	query := `DELETE FROM bookings WHERE id = $1`
+	result, err := tx.Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete booking: %w", err)
+	}
+
+	if rowsAffected := result.RowsAffected(); rowsAffected == 0 {
+		return models.ErrBookingNotFound
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (r *BookingRepository) GetBookingByID(ctx context.Context, id string) (*models.Booking, error) {
+	query := `
+        SELECT 
+            B.id, B.status, B.created_at,
+            U.id, U.first_name, U.last_name, U.gender, U.birthday,
+            F.id, F.launchpad_id, F.launch_date,
+            D.id, D.name
+        FROM bookings B
+        JOIN users U ON U.id = B.user_id
+        JOIN flights F ON F.id = B.flight_id
+        JOIN destinations D ON D.id = F.destination_id
+        WHERE B.id = $1
+    `
+
+	var booking models.Booking
+	var destinationID uuid.UUID
+	var destinationName string
+
+	err := r.db.QueryRow(ctx, query, id).Scan(
+		&booking.ID, &booking.Status, &booking.CreatedAt,
+		&booking.User.ID, &booking.User.FirstName, &booking.User.LastName, &booking.User.Gender, &booking.User.Birthday,
+		&booking.Flight.ID, &booking.Flight.LaunchpadID, &booking.Flight.LaunchDate,
+		&destinationID, &destinationName,
+	)
+
+	if err == pgx.ErrNoRows {
+		return nil, models.ErrBookingNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get booking: %w", err)
+	}
+
+	booking.Flight.Destination = models.Destination{
+		ID:   destinationID,
+		Name: destinationName,
+	}
+
+	return &booking, nil
+}
+
 func (r *BookingRepository) GetBookingsPaginated(ctx context.Context, afterCursor string, limit int) ([]models.Booking, string, error) {
 	query := `
         SELECT 
@@ -80,7 +140,7 @@ func (r *BookingRepository) GetBookingsPaginated(ctx context.Context, afterCurso
 	var conditions []string
 
 	if afterCursor != "" {
-		afterTime, afterUUID, err := decodeCursor(afterCursor)
+		afterTime, afterUUID, err := utils.DecodeCursor(afterCursor)
 		if err != nil {
 			return nil, "", err
 		}
@@ -131,7 +191,7 @@ func (r *BookingRepository) GetBookingsPaginated(ctx context.Context, afterCurso
 
 	var nextCursor string
 	if len(bookings) == limit {
-		nextCursor = encodeCursor(lastBooking.CreatedAt, lastBooking.ID)
+		nextCursor = utils.EncodeCursor(lastBooking.CreatedAt, lastBooking.ID)
 	}
 
 	return bookings, nextCursor, nil
@@ -268,29 +328,4 @@ func (r *BookingRepository) createBookingTx(ctx context.Context, tx pgx.Tx, book
     `
 	_, err := tx.Exec(ctx, query, booking.ID, booking.User.ID, booking.Flight.ID, booking.Status, booking.CreatedAt)
 	return err
-}
-
-func encodeCursor(t time.Time, id uuid.UUID) string {
-	cursor := fmt.Sprintf("%s,%s", t.Format(time.RFC3339Nano), id.String())
-	return base64.StdEncoding.EncodeToString([]byte(cursor))
-}
-
-func decodeCursor(encoded string) (time.Time, uuid.UUID, error) {
-	decodedBytes, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return time.Time{}, uuid.Nil, err
-	}
-	parts := strings.Split(string(decodedBytes), ",")
-	if len(parts) != 2 {
-		return time.Time{}, uuid.Nil, fmt.Errorf("invalid cursor format")
-	}
-	t, err := time.Parse(time.RFC3339Nano, parts[0])
-	if err != nil {
-		return time.Time{}, uuid.Nil, err
-	}
-	id, err := uuid.Parse(parts[1])
-	if err != nil {
-		return time.Time{}, uuid.Nil, err
-	}
-	return t, id, nil
 }

@@ -42,6 +42,7 @@ var (
 	ErrInvalidUUID          = errors.New("invalid uuid")
 	ErrMissingDestination   = errors.New("destination does not exist")
 	ErrLaunchPadUnavailable = errors.New("launchpad is unavailable")
+	ErrBookingNotFound      = errors.New("booking not found")
 )
 
 type Destination struct {

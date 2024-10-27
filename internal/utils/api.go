@@ -1,12 +1,15 @@
 package utils
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type ApiError struct {
@@ -78,6 +81,31 @@ func AllowedContentTypes(next http.HandlerFunc, mediaTypes ...string) http.Handl
 			RenderResponse(r, w, http.StatusUnsupportedMediaType, nil)
 		}
 	}
+}
+
+func EncodeCursor(t time.Time, id uuid.UUID) string {
+	cursor := fmt.Sprintf("%s,%s", t.Format(time.RFC3339Nano), id.String())
+	return base64.StdEncoding.EncodeToString([]byte(cursor))
+}
+
+func DecodeCursor(encoded string) (time.Time, uuid.UUID, error) {
+	decodedBytes, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return time.Time{}, uuid.Nil, err
+	}
+	parts := strings.Split(string(decodedBytes), ",")
+	if len(parts) != 2 {
+		return time.Time{}, uuid.Nil, fmt.Errorf("invalid cursor format")
+	}
+	t, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return time.Time{}, uuid.Nil, err
+	}
+	id, err := uuid.Parse(parts[1])
+	if err != nil {
+		return time.Time{}, uuid.Nil, err
+	}
+	return t, id, nil
 }
 
 func existsInSlice(list []string, needle string) bool {

@@ -2,9 +2,11 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	models "github.com/chrisdamba/spacetrouble/internal"
 	"github.com/chrisdamba/spacetrouble/internal/service"
 	"github.com/chrisdamba/spacetrouble/tests/mocks"
+	"github.com/chrisdamba/spacetrouble/tests/utils"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -242,6 +244,180 @@ func TestCreateBooking(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, booking)
 		assert.Contains(t, err.Error(), "error checking SpaceX availability")
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestDeleteBooking(t *testing.T) {
+	t.Run("successful deletion", func(t *testing.T) {
+		mockRepo := new(mocks.MockBookingRepository)
+		mockSpaceX := new(mocks.MockSpaceXClient)
+		svc := service.NewBookingService(mockRepo, mockSpaceX)
+
+		bookingID := uuid.New().String()
+		ctx := context.Background()
+
+		mockBooking := &models.Booking{
+			ID:     uuid.MustParse(bookingID),
+			Status: models.StatusActive,
+		}
+
+		mockRepo.On("GetBookingByID", ctx, bookingID).Return(mockBooking, nil)
+		mockRepo.On("DeleteBooking", ctx, bookingID).Return(nil)
+
+		err := svc.DeleteBooking(ctx, bookingID)
+
+		assert.NoError(t, err)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("invalid UUID", func(t *testing.T) {
+		mockRepo := new(mocks.MockBookingRepository)
+		mockSpaceX := new(mocks.MockSpaceXClient)
+		svc := service.NewBookingService(mockRepo, mockSpaceX)
+
+		err := svc.DeleteBooking(context.Background(), "invalid-uuid")
+
+		assert.Error(t, err)
+		assert.Equal(t, models.ErrInvalidUUID, err)
+		mockRepo.AssertNotCalled(t, "DeleteBooking")
+	})
+
+	t.Run("booking not found", func(t *testing.T) {
+		mockRepo := new(mocks.MockBookingRepository)
+		mockSpaceX := new(mocks.MockSpaceXClient)
+		svc := service.NewBookingService(mockRepo, mockSpaceX)
+
+		bookingID := uuid.New().String()
+		ctx := context.Background()
+
+		mockRepo.On("GetBookingByID", ctx, bookingID).Return(nil, models.ErrBookingNotFound)
+
+		err := svc.DeleteBooking(ctx, bookingID)
+
+		assert.Error(t, err)
+		assert.Equal(t, models.ErrBookingNotFound, err)
+		mockRepo.AssertNotCalled(t, "DeleteBooking")
+	})
+
+	t.Run("cannot delete cancelled booking", func(t *testing.T) {
+		mockRepo := new(mocks.MockBookingRepository)
+		mockSpaceX := new(mocks.MockSpaceXClient)
+		svc := service.NewBookingService(mockRepo, mockSpaceX)
+
+		bookingID := uuid.New().String()
+		ctx := context.Background()
+
+		mockBooking := &models.Booking{
+			ID:     uuid.MustParse(bookingID),
+			Status: models.StatusCancelled,
+		}
+
+		mockRepo.On("GetBookingByID", ctx, bookingID).Return(mockBooking, nil)
+
+		err := svc.DeleteBooking(ctx, bookingID)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot delete booking with status")
+		mockRepo.AssertNotCalled(t, "DeleteBooking")
+	})
+}
+
+func TestAllBookings(t *testing.T) {
+	t.Run("successful retrieval", func(t *testing.T) {
+		mockRepo := new(mocks.MockBookingRepository)
+		mockSpaceX := new(mocks.MockSpaceXClient)
+		svc := service.NewBookingService(mockRepo, mockSpaceX)
+
+		ctx := context.Background()
+		cursor := "some-cursor"
+		limit := 10
+
+		mockBookings := utils.CreateMockBookings(2)
+		nextCursor := "next-cursor"
+
+		mockRepo.On("GetBookingsPaginated", ctx, cursor, limit).
+			Return(mockBookings, nextCursor, nil)
+
+		getReq := models.GetBookingsRequest{
+			Limit: limit,
+			Uuid:  cursor,
+		}
+		response, err := svc.AllBookings(ctx, getReq)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, response)
+		assert.Len(t, response.Bookings, 2)
+		assert.Equal(t, limit, response.Limit)
+		assert.Equal(t, nextCursor, response.Cursor)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("repository error", func(t *testing.T) {
+		mockRepo := new(mocks.MockBookingRepository)
+		mockSpaceX := new(mocks.MockSpaceXClient)
+		svc := service.NewBookingService(mockRepo, mockSpaceX)
+
+		ctx := context.Background()
+
+		// Return empty slice instead of nil for first argument
+		mockRepo.On("GetBookingsPaginated", ctx, "", 10).
+			Return([]models.Booking{}, "", errors.New("database error"))
+
+		getReq := models.GetBookingsRequest{
+			Limit: 10,
+			Uuid:  "",
+		}
+		response, err := svc.AllBookings(ctx, getReq)
+
+		assert.Error(t, err)
+		assert.Nil(t, response)
+		assert.Contains(t, err.Error(), "error fetching bookings")
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("negative limit converted to default", func(t *testing.T) {
+		mockRepo := new(mocks.MockBookingRepository)
+		mockSpaceX := new(mocks.MockSpaceXClient)
+		svc := service.NewBookingService(mockRepo, mockSpaceX)
+
+		ctx := context.Background()
+
+		// Service should convert negative limit to 10 before calling repository
+		mockRepo.On("GetBookingsPaginated", ctx, "", 10).
+			Return([]models.Booking{}, "", nil)
+
+		getReq := models.GetBookingsRequest{
+			Limit: -5,
+			Uuid:  "",
+		}
+		response, err := svc.AllBookings(ctx, getReq)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, response)
+		assert.Equal(t, 10, response.Limit)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("zero limit converted to default", func(t *testing.T) {
+		mockRepo := new(mocks.MockBookingRepository)
+		mockSpaceX := new(mocks.MockSpaceXClient)
+		svc := service.NewBookingService(mockRepo, mockSpaceX)
+
+		ctx := context.Background()
+
+		mockRepo.On("GetBookingsPaginated", ctx, "", 10).
+			Return([]models.Booking{}, "", nil)
+
+		getReq := models.GetBookingsRequest{
+			Limit: 0,
+			Uuid:  "",
+		}
+		response, err := svc.AllBookings(ctx, getReq)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, response)
+		assert.Equal(t, 10, response.Limit)
 		mockRepo.AssertExpectations(t)
 	})
 }
