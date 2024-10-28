@@ -27,7 +27,7 @@ SpaceTrouble is a Go-based REST API for booking space travel tickets. It enables
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/spacetrouble.git
+git clone https://github.com/chrisdamba/spacetrouble.git
 cd spacetrouble
 ```
 
@@ -81,6 +81,7 @@ make docker-up
 ```
 
 The API will be available at `http://localhost:5000`
+I'll update the API Endpoints section of the README.md with the new endpoints and more detailed information:
 
 ## API Endpoints 🛠️
 
@@ -99,16 +100,127 @@ Content-Type: application/json
     "launch_date": "2025-01-01T00:00:00Z"
 }
 ```
+Response (201 Created):
+```json
+{
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "user": {
+        "id": "123e4567-e89b-12d3-a456-426614174001",
+        "first_name": "John",
+        "last_name": "Doe",
+        "gender": "male",
+        "birthday": "1990-01-01T00:00:00Z"
+    },
+    "flight": {
+        "id": "123e4567-e89b-12d3-a456-426614174002",
+        "launchpad_id": "5e9e4502f5090995de566f86",
+        "destination": {
+            "id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+            "name": "Mars"
+        },
+        "launch_date": "2025-01-01T00:00:00Z"
+    },
+    "status": "ACTIVE",
+    "created_at": "2024-01-01T00:00:00Z"
+}
+```
 
-### Get Bookings
+### List Bookings
 ```http
-GET /v1/bookings
+GET /v1/bookings?limit=10&cursor=<cursor_token>
 Accept: application/json
 ```
+Response (200 OK):
+```json
+{
+    "bookings": [
+        {
+            "id": "123e4567-e89b-12d3-a456-426614174000",
+            "user": {
+                "id": "123e4567-e89b-12d3-a456-426614174001",
+                "first_name": "John",
+                "last_name": "Doe",
+                "gender": "male",
+                "birthday": "1990-01-01T00:00:00Z"
+            },
+            "flight": {
+                "id": "123e4567-e89b-12d3-a456-426614174002",
+                "launchpad_id": "5e9e4502f5090995de566f86",
+                "destination": {
+                    "id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+                    "name": "Mars"
+                },
+                "launch_date": "2025-01-01T00:00:00Z"
+            },
+            "status": "ACTIVE",
+            "created_at": "2024-01-01T00:00:00Z"
+        }
+    ],
+    "limit": 10,
+    "cursor": "next_page_token"
+}
+```
+
+### Delete Booking
+```http
+DELETE /v1/bookings?id=123e4567-e89b-12d3-a456-426614174000
+```
+Response (204 No Content)
 
 ### Health Check
 ```http
 GET /v1/health
+```
+Response (200 OK):
+```json
+{
+    "status": "healthy",
+    "timestamp": "2024-01-01T00:00:00Z",
+    "version": "1.0.0",
+    "uptime": "24h0m0s",
+    "go_version": "go1.22",
+    "memory": {
+        "alloc": 1234567,
+        "totalAlloc": 2345678,
+        "sys": 3456789,
+        "numGC": 10
+    }
+}
+```
+
+### Available Destinations
+| Destination | ID |
+|-------------|------|
+| Mars | a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11 |
+| Moon | b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22 |
+| Pluto | c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33 |
+| Asteroid Belt | d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44 |
+| Europa | e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a55 |
+| Titan | f0eebc99-9c0b-4ef8-bb6d-6bb9bd380a66 |
+| Ganymede | 70eebc99-9c0b-4ef8-bb6d-6bb9bd380a77 |
+
+### Error Responses
+| Status Code | Description |
+|-------------|-------------|
+| 400 | Bad Request - Invalid input data |
+| 404 | Not Found - Booking or destination not found |
+| 409 | Conflict - Launchpad unavailable or SpaceX conflict |
+| 500 | Internal Server Error |
+
+Example error response:
+```json
+{
+    "error": "launchpad is unavailable"
+}
+```
+
+### Request Validation Rules
+- `first_name`, `last_name`: Required, max 50 characters
+- `gender`: Must be "male", "female", or "other"
+- `birthday`: Must be between 18-75 years old
+- `launchpad_id`: Must be 24 characters
+- `destination_id`: Must be a valid UUID from available destinations
+- `launch_date`: Must be in the future
 ```
 
 ## Environment Variables ⚙️
