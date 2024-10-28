@@ -33,7 +33,7 @@ CREATE OR REPLACE FUNCTION launch_in_same_week(
     p_launch_date TIMESTAMP
 ) RETURNS BOOLEAN AS $$
 BEGIN
-RETURN EXISTS (
+RETURN NOT EXISTS (
     SELECT 1
     FROM flights f
     WHERE f.launchpad_id = p_launchpad_id

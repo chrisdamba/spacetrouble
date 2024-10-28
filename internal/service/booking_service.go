@@ -23,7 +23,11 @@ func NewBookingService(repo ports.BookingRepository, spaceX ports.SpaceXClient) 
 
 func (s *bookingService) CreateBooking(ctx context.Context, request *models.BookingRequest) (*models.Booking, error) {
 	// validate the destination exists
-	destination, err := s.repo.GetDestinationById(ctx, request.DestinationID.String())
+	destinationID, err := uuid.Parse(request.DestinationID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid destination id: %w", err)
+	}
+	destination, err := s.repo.GetDestinationById(ctx, request.DestinationID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid destination: %w", err)
 	}
@@ -38,19 +42,25 @@ func (s *bookingService) CreateBooking(ctx context.Context, request *models.Book
 	}
 
 	// if flights exist for this date but different destination, launchpad is unavailable
-	if len(flights) > 0 && flights[0].Destination.ID != request.DestinationID {
-		return nil, fmt.Errorf("launchpad already booked for different destination on this date")
+	if len(flights) > 0 {
+		destinationUUID, err := uuid.Parse(request.DestinationID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid destination id: %w", err)
+		}
+		if flights[0].Destination.ID != destinationUUID {
+			return nil, fmt.Errorf("launchpad already booked for different destination on this date")
+		}
 	}
 
 	// check if launchpad is already used for this destination in the same week
-	available, err := s.repo.IsLaunchPadWeekAvailable(ctx,
+	exists, err := s.repo.IsLaunchPadWeekAvailable(ctx,
 		request.LaunchpadID,
-		request.DestinationID.String(),
+		destinationID.String(),
 		request.LaunchDate)
 	if err != nil {
 		return nil, fmt.Errorf("error checking weekly availability: %w", err)
 	}
-	if !available {
+	if exists { // Note: we're checking if it exists, not if it's available
 		return nil, fmt.Errorf("launchpad already scheduled for this destination this week")
 	}
 
