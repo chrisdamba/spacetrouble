@@ -256,11 +256,19 @@ spacetrouble/
 │   ├── config/                 # Configuration management
 │   ├── health/                 # Health check endpoint
 │   └── spacex/                 # SpaceX API client
+├── tests/                      # Tests
+│   ├── api/
+│   ├── mocks/
+│   ├── pkg/
+│   ├── repository/
+│   ├── service/
+│   ├── utils/
+│   └── validator/
 ├── migrations/                 # Database migrations
 ├── Dockerfile                  # Docker build instructions
-├── docker-compose.yml         # Docker compose configuration
-├── Makefile                   # Build and development commands
-└── README.md                  # Project documentation
+├── docker-compose.yml          # Docker compose configuration
+├── Makefile                    # Build and development commands
+└── README.md                   # Project documentation
 ```
 
 ## Available Make Commands 🛠️
@@ -279,6 +287,251 @@ spacetrouble/
 Run the test suite:
 ```bash
 make test
+```
+
+## Testing Structure 🧪
+
+### Test Organization
+```
+tests/
+├── api/                            # API handler tests
+│   └── api_test.go                 # Tests for API endpoints
+├── mocks/                          # Mock implementations
+│   ├── booking_repository.go       # Mock repository
+│   └── spacex_client.go            # Mock SpaceX client
+├── pkg/                            # Package tests
+│   ├── config/                     # Configuration tests
+│   ├── health/                     # Health check tests
+│   └── spacex/                     # SpaceX client tests
+├── repository/                     # Repository layer tests
+│   └── booking_repository_test.go
+├── service/                        # Service layer tests
+│   └── booking_service_test.go
+├── utils/                          # Test utilities
+│   └── mock_data.go                # Test data generators
+└── validator/                      # Validation tests
+└── validator_test.go
+```
+
+### Test Coverage
+
+#### API Tests (`tests/api/`)
+- Tests HTTP endpoints
+- Validates request/response formats
+- Checks content type handling
+- Verifies error responses
+- Tests pagination
+- Validates HTTP method restrictions
+
+#### Repository Tests (`tests/repository/`)
+- Database CRUD operations
+- Transaction handling
+- Error scenarios
+- Connection pooling
+- Query building
+- Cursor-based pagination
+
+#### Service Tests (`tests/service/`)
+- Business logic validation
+- SpaceX integration
+- Booking workflow
+- Error handling
+- Data transformation
+- Business rules enforcement
+
+#### Mock Implementations (`tests/mocks/`)
+- `MockBookingRepository`: Repository layer mocking
+  - Simulates database operations
+  - Provides predictable responses
+  - Enables error scenario testing
+
+- `MockSpaceXClient`: SpaceX API mocking
+  - Simulates API responses
+  - Tests network failures
+  - Validates integration points
+
+#### Test Utilities (`tests/utils/`)
+- `mock_data.go`: Test data generation
+  - Creates consistent test bookings
+  - Generates valid UUIDs
+  - Provides sample requests/responses
+  - Helps compare complex objects
+
+### Running Tests
+
+#### All Tests
+```bash
+make test
+```
+
+#### Specific Package Tests
+```bash
+go test ./tests/service/...
+go test ./tests/repository/...
+go test ./tests/api/...
+```
+
+#### With Coverage
+```bash
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+```
+
+### Test Categories
+
+#### Unit Tests
+- Individual component testing
+- Mock external dependencies
+- Fast execution
+- High coverage
+
+#### Integration Tests
+- Database interaction
+- API endpoint behavior
+- External service integration
+- Real-world scenarios
+
+#### Mock Tests
+Tests using mock implementations to verify:
+- Error handling
+- Edge cases
+- Resource unavailability
+- Invalid data scenarios
+
+### Test Scenarios
+
+#### Booking Creation Tests
+- Valid booking creation
+- Invalid input validation
+- Destination verification
+- Launch date conflicts
+- SpaceX availability
+- Database errors
+- Transaction rollback
+
+#### Booking Listing Tests
+- Pagination functionality
+- Cursor handling
+- Empty results
+- Large result sets
+- Filter application
+- Sort ordering
+
+#### Booking Deletion Tests
+- Successful deletion
+- Non-existent booking
+- Invalid UUID
+- Unauthorized deletion
+- Status validation
+
+#### Error Handling Tests
+- Database connection failures
+- SpaceX API unavailability
+- Invalid input data
+- Business rule violations
+- Concurrent access
+
+### Test Design Principles
+
+1. **Isolation**
+   - Tests run independently
+   - No shared state
+   - Clean setup/teardown
+
+2. **Reproducibility**
+   - Consistent test data
+   - Deterministic results
+   - Clear failure messages
+
+3. **Coverage**
+   - Happy path scenarios
+   - Error conditions
+   - Edge cases
+   - Business rules
+
+4. **Maintainability**
+   - Clear test names
+   - Shared utilities
+   - Common patterns
+   - Documentation
+
+### Writing New Tests
+
+1. Create test file in appropriate directory
+```go
+package repository_test
+
+func TestNewFeature(t *testing.T) {
+    t.Run("successful case", func(t *testing.T) {
+        // Test setup
+        // Test execution
+        // Assertions
+    })
+
+    t.Run("error case", func(t *testing.T) {
+        // Test setup
+        // Test execution
+        // Assertions
+    })
+}
+```
+
+2. Use test utilities
+```go
+booking := utils.CreateMockBooking(uuid.Nil)
+bookings := utils.CreateMockBookings(5)
+```
+
+3. Use mocks
+```go
+mockRepo := new(mocks.MockBookingRepository)
+mockSpaceX := new(mocks.MockSpaceXClient)
+```
+
+4. Assert expectations
+```go
+assert.NoError(t, err)
+assert.Equal(t, expected, actual)
+mockRepo.AssertExpectations(t)
+```
+
+### Common Test Patterns
+
+1. **Table-Driven Tests**
+```go
+tests := []struct {
+    name     string
+    input    string
+    expected string
+    wantErr  bool
+}{
+    {"valid case", "input", "expected", false},
+    {"error case", "bad input", "", true},
+}
+
+for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+        // Test logic
+    })
+}
+```
+
+2. **Setup/Teardown**
+```go
+func setupTest(t *testing.T) (*mocks.MockBookingRepository, *service.BookingService) {
+    mockRepo := new(mocks.MockBookingRepository)
+    svc := service.NewBookingService(mockRepo)
+    return mockRepo, svc
+}
+```
+
+3. **Helper Functions**
+```go
+func assertBookingsEqual(t *testing.T, expected, actual *models.Booking) {
+    t.Helper()
+    assert.Equal(t, expected.ID, actual.ID)
+    // Additional assertions
+}
 ```
 
 ## Deployment 🚢
