@@ -221,7 +221,7 @@ Example error response:
 - `launchpad_id`: Must be 24 characters
 - `destination_id`: Must be a valid UUID from available destinations
 - `launch_date`: Must be in the future
-```
+
 
 ## Environment Variables ⚙️
 
