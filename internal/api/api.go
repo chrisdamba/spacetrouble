@@ -66,7 +66,7 @@ func list(service ports.BookingService, w http.ResponseWriter, r *http.Request) 
 	getReq := models.GetBookingsRequest{
 		Limit: limit,
 	}
-	if len(cursor) > 0 {
+	if cursor != "" {
 		var err error
 		var getReqUuid uuid.UUID
 		_, getReqUuid, err = utils.DecodeCursor(cursor)
