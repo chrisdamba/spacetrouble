@@ -81,7 +81,6 @@ make docker-up
 ```
 
 The API will be available at `http://localhost:5000`
-I'll update the API Endpoints section of the README.md with the new endpoints and more detailed information:
 
 ## API Endpoints 🛠️
 
